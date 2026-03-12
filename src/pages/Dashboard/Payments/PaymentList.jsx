@@ -1,0 +1,104 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import paymentApi from '~/apis/paymentApi';
+import moment from 'moment';
+
+import Box from '@mui/material/Box';
+import Grid from '@mui/material/Grid';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Paper from '@mui/material/Paper';
+import TextField from '@mui/material/TextField';
+import MenuItem from '@mui/material/MenuItem';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Checkbox from '@mui/material/Checkbox';
+import { DataGrid } from '@mui/x-data-grid';
+import Drawer from '@mui/material/Drawer';
+
+import EditIcon from '@mui/icons-material/Edit';
+import SearchIcon from '@mui/icons-material/Search';
+import CloseIcon from '@mui/icons-material/Close';
+import InputAdornment from '@mui/material/InputAdornment';
+
+export default function PaymentList() {
+  const [payments, setPayments] = useState([]);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 10 });
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const [statusDialogVisible, setStatusDialogVisible] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [newStatus, setNewStatus] = useState('');
+  const [trxRef, setTrxRef] = useState('');
+  const [updating, setUpdating] = useState(false);
+
+  const navigate = useNavigate();
+
+  const statusOpts = ['pending', 'paid', 'failed', 'refunded'];
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      fetchPayments();
+    }, 500);
+    return () => clearTimeout(delayDebounceFn);
+  }, [paginationModel, searchQuery]);
+  const fetchPayments = async () => {
+    try { setLoading(true); const params = { page: paginationModel.page + 1, limit: paginationModel.pageSize }; if (searchQuery) params.search = searchQuery; const r = await paymentApi.getAllPayments(params); setPayments(r.data.payments || []); setTotalRecords(r.data.pagination?.total || 0); } catch { toast.error('Failed to fetch payments'); } finally { setLoading(false); }
+  };
+  const openStatusDialog = (p) => { setSelectedPayment(p); setNewStatus(p.status); setTrxRef(p.transactionRef || ''); setStatusDialogVisible(true); };
+  const submitStatusUpdate = async () => {
+    try { setUpdating(true); await paymentApi.updatePaymentStatus(selectedPayment._id, { status: newStatus, transactionRef: trxRef }); toast.success('Updated'); setStatusDialogVisible(false); fetchPayments(); } catch { toast.error('Failed'); } finally { setUpdating(false); }
+  };
+
+  const statusStyle = (s) => ({ color: { paid: '#16a34a', pending: '#d97706', failed: '#dc2626', refunded: '#2563eb' }[s] || '#6b7280', fontWeight: 600, fontSize: '0.8rem' });
+  const fmt = (v) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v);
+
+  const columns = [
+    { field: '_id', headerName: 'Txn ID', minWidth: 100, flex: 0.8, renderCell: (p) => <Typography variant="body2" sx={{ fontFamily: 'monospace', color: 'text.secondary', fontSize: '0.8rem' }}>{p.value.substring(p.value.length - 8).toUpperCase()}</Typography> },
+    { field: 'orderId', headerName: 'Order', minWidth: 90, flex: 0.7, renderCell: (p) => { const v = p.value?._id || p.value; return v ? <Button size="small" onClick={() => navigate(`/dashboard/orders/${v}`)} sx={{ fontWeight: 600, p: 0, minWidth: 0 }}>#{String(v).substring(String(v).length - 6).toUpperCase()}</Button> : null; } },
+    { field: 'createdAt', headerName: 'Date', minWidth: 130, flex: 1, renderCell: (p) => <Typography variant="body2" color="text.secondary">{moment(p.value).format('DD/MM/YYYY HH:mm')}</Typography> },
+    { field: 'amount', headerName: 'Amount', minWidth: 100, flex: 0.8, renderCell: (p) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{fmt(p.value)}</Typography> },
+    { field: 'method', headerName: 'Method', minWidth: 80, flex: 0.6, renderCell: (p) => <Typography variant="body2" sx={{ textTransform: 'uppercase', fontSize: '0.8rem' }}>{p.value}</Typography> },
+    { field: 'status', headerName: 'Status', minWidth: 90, flex: 0.7, renderCell: (p) => <Typography variant="body2" sx={statusStyle(p.value)}>{p.value?.toUpperCase()}</Typography> },
+    { field: 'actions', headerName: '', width: 40, sortable: false, renderCell: (p) => <IconButton size="small" onClick={() => openStatusDialog(p.row)}><EditIcon fontSize="small" /></IconButton> },
+  ];
+
+  return (
+    <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
+        <Box><Typography variant="h5" sx={{ fontWeight: 700 }}>Payments</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Transaction history and payment records.</Typography></Box>
+      </Box>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        {[{ l: 'Total', v: totalRecords }, { l: 'Paid', v: payments.filter(p => p.status === 'paid').length }, { l: 'Pending', v: payments.filter(p => p.status === 'pending').length }].map((s) => (
+          <Grid size={{ xs: 4 }} key={s.l}><Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.l}</Typography><Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>{s.v}</Typography></Paper></Grid>
+        ))}
+      </Grid>
+      <Paper variant="outlined" sx={{ borderRadius: 2, p: 2 }}>
+        <TextField placeholder="Search by transaction ref, or order ID" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} size="small" sx={{ mb: 2, width: { xs: '100%', md: 350 } }} />
+        <DataGrid rows={payments} columns={columns} getRowId={(r) => r._id} loading={loading} paginationMode="server" rowCount={totalRecords} paginationModel={paginationModel} onPaginationModelChange={setPaginationModel} pageSizeOptions={[10, 25, 50]} autoHeight disableRowSelectionOnClick density="comfortable" sx={{ border: 'none', '& .MuiDataGrid-columnHeaders': { bgcolor: 'grey.50' }, '& .MuiDataGrid-cell': { borderColor: 'grey.100' } }} localeText={{ noRowsLabel: 'No payments.' }} />
+      </Paper>
+
+      <Drawer anchor="right" open={statusDialogVisible} onClose={() => !updating && setStatusDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 400 } } }}>
+        <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Update Status</Typography>
+          <IconButton onClick={() => setStatusDialogVisible(false)} size="small" disabled={updating}><CloseIcon fontSize="small" /></IconButton>
+        </Box>
+        <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+          <TextField select label="Status" value={newStatus} onChange={(e) => setNewStatus(e.target.value)} fullWidth size="medium">{statusOpts.map(s => <MenuItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</MenuItem>)}</TextField>
+          {(newStatus === 'paid' || newStatus === 'refunded') && <TextField label="Transaction Ref" value={trxRef} onChange={(e) => setTrxRef(e.target.value)} fullWidth size="medium" />}
+        </Box>
+        <Box sx={{ p: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end', gap: 1.5, bgcolor: 'grey.50' }}>
+          <Button onClick={() => setStatusDialogVisible(false)} disabled={updating} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
+          <Button variant="contained" onClick={submitStatusUpdate} disabled={updating} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{updating ? 'Saving...' : 'Save Changes'}</Button>
+        </Box>
+      </Drawer>
+    </Box>
+  );
+}
