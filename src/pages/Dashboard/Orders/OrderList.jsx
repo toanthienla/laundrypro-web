@@ -24,10 +24,10 @@ import DialogActions from '@mui/material/DialogActions';
 import { DataGrid } from '@mui/x-data-grid';
 
 import VisibilityIcon from '@mui/icons-material/Visibility';
-import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
+import EditIcon from '@mui/icons-material/Edit';
 import InputAdornment from '@mui/material/InputAdornment';
 import RemoveIcon from '@mui/icons-material/Remove';
 
@@ -46,11 +46,14 @@ export default function OrderList() {
   const [createDialogVisible, setCreateDialogVisible] = useState(false);
   const [addItemsDrawerVisible, setAddItemsDrawerVisible] = useState(false);
   const [confirmCreateOpen, setConfirmCreateOpen] = useState(false);
+  const [isEdit, setIsEdit] = useState(false);
+  const [editOrderId, setEditOrderId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [services, setServices] = useState([]);
   const [serviceSearchQuery, setServiceSearchQuery] = useState('');
   const [note, setNote] = useState('');
   const [items, setItems] = useState([]);
+  const [editStatus, setEditStatus] = useState('pending');
 
   const [customerQuery, setCustomerQuery] = useState('');
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
@@ -98,6 +101,7 @@ export default function OrderList() {
 
   const clearDraft = () => {
     setCustomerQuery(''); setCustomerPhone(''); setCustomerName(''); setCustomerAddress(''); setNote(''); setItems([]); setServiceSearchQuery('');
+    setIsEdit(false); setEditOrderId(null); setEditStatus('pending');
   };
 
   const handleItemQtyChange = (svc, delta) => {
@@ -121,16 +125,41 @@ export default function OrderList() {
   const fmt = (v) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v || 0);
 
   const handleCreateOrder = () => {
+    // For non-pending edits (status change only), skip item/customer validation
+    if (isEdit && editStatus !== 'pending') {
+      setConfirmCreateOpen(true);
+      return;
+    }
     if (!customerPhone || !customerName) { toast.warn('Customer info is required.'); return; }
     if (items.length === 0 || items.some(i => !i.serviceId)) { toast.warn('Add at least one valid item.'); return; }
     setConfirmCreateOpen(true);
   };
 
-  const executeCreateOrder = async () => {
+  const executeSaveOrder = async () => {
     try {
       setSaving(true);
-      await orderApi.createOrder({ customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice })) });
-      toast.success('Order created!');
+      if (isEdit) {
+        const originalOrder = orders.find(o => o._id === editOrderId);
+        const isPending = originalOrder?.status === 'pending';
+
+        if (isPending) {
+          // Full update: items + customer + note
+          const payload = { customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice })) };
+          await orderApi.updateOrder(editOrderId, payload);
+        } else {
+          // Non-pending: only update note
+          await orderApi.updateOrder(editOrderId, { note });
+        }
+        // Update status if changed
+        if (originalOrder && originalOrder.status !== editStatus) {
+          await orderApi.updateOrderStatus(editOrderId, editStatus);
+        }
+        toast.success('Order updated!');
+      } else {
+        const payload = { customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice })) };
+        await orderApi.createOrder(payload);
+        toast.success('Order created!');
+      }
       setConfirmCreateOpen(false);
       setCreateDialogVisible(false);
       clearDraft();
@@ -141,6 +170,30 @@ export default function OrderList() {
       setSaving(false);
     }
   };
+
+  const openEditDialog = async (row) => {
+    clearDraft();
+    setIsEdit(true);
+    setEditOrderId(row._id);
+
+    const phone = row.customerId?.phone?.replace(/^\+84/, '0') || '';
+    setCustomerPhone(phone);
+    setCustomerQuery(phone);
+    setCustomerName(row.customerId?.name || '');
+    setCustomerAddress(row.customerId?.address || '');
+    setNote(row.note || '');
+    setEditStatus(row.status || 'pending');
+
+    if (row.orderItems) {
+      setItems(row.orderItems.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice, totalPrice: i.totalPrice })));
+    } else {
+      setItems([]);
+    }
+
+    setCreateDialogVisible(true);
+    loadServices();
+  };
+
 
   const statusStyle = (s) => ({ color: s === 'completed' ? '#16a34a' : '#d97706', fontWeight: 600, fontSize: '0.8rem' });
   const payStyle = (s) => ({ color: { paid: '#16a34a', pending: '#d97706', failed: '#dc2626', refunded: '#2563eb' }[s] || '#6b7280', fontWeight: 600, fontSize: '0.8rem' });
@@ -154,7 +207,14 @@ export default function OrderList() {
     { field: 'note', headerName: 'Note', minWidth: 120, flex: 1, renderCell: (p) => <Typography variant="caption" sx={{ fontStyle: 'italic', color: 'text.secondary', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.value || '—'}</Typography> },
     { field: 'status', headerName: 'Status', minWidth: 90, flex: 0.7, renderCell: (p) => <Typography variant="body2" sx={statusStyle(p.value)}>{p.value?.toUpperCase()}</Typography> },
     { field: 'payment', headerName: 'Payment', minWidth: 90, flex: 0.7, renderCell: (p) => <Typography variant="body2" sx={payStyle(p.value?.status)}>{p.value ? p.value.status.toUpperCase() : 'UNPAID'}</Typography> },
-    { field: 'actions', headerName: '', width: 50, sortable: false, renderCell: (p) => <IconButton size="small" onClick={() => setViewOrderId(p.row._id)}><VisibilityIcon fontSize="small" /></IconButton> },
+    {
+      field: 'actions', headerName: '', width: 120, sortable: false, renderCell: (p) => (
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <IconButton size="small" onClick={() => setViewOrderId(p.row._id)}><VisibilityIcon fontSize="small" /></IconButton>
+          <IconButton size="small" onClick={() => openEditDialog(p.row)}><EditIcon fontSize="small" /></IconButton>
+        </Box>
+      )
+    },
   ];
 
   return (
@@ -172,8 +232,9 @@ export default function OrderList() {
           { label: 'Total', value: totalRecords },
           { label: 'Pending', value: orders.filter(o => o.status === 'pending').length },
           { label: 'Completed', value: orders.filter(o => o.status === 'completed').length },
+          { label: 'Deleted', value: orders.filter(o => o.status === 'deleted').length },
         ].map((s) => (
-          <Grid size={{ xs: 4 }} key={s.label}>
+          <Grid size={{ xs: 3 }} key={s.label}>
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.label}</Typography>
               <Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>{s.value}</Typography>
@@ -189,92 +250,134 @@ export default function OrderList() {
             <MenuItem value="all">All Statuses</MenuItem>
             <MenuItem value="pending">Pending</MenuItem>
             <MenuItem value="completed">Completed</MenuItem>
-            <MenuItem value="cancelled">Cancelled</MenuItem>
+            <MenuItem value="deleted">Deleted</MenuItem>
           </TextField>
         </Box>
         <DataGrid rows={orders} columns={columns} getRowId={(r) => r._id} loading={loading} paginationMode="server" rowCount={totalRecords} paginationModel={paginationModel} onPaginationModelChange={setPaginationModel} pageSizeOptions={[10, 25, 50]} autoHeight disableRowSelectionOnClick density="comfortable" sx={{ border: 'none', '& .MuiDataGrid-columnHeaders': { bgcolor: 'grey.50' }, '& .MuiDataGrid-cell': { borderColor: 'grey.100' } }} localeText={{ noRowsLabel: 'No orders found.' }} />
       </Paper>
 
-      {/* Create Order Drawer */}
+      {/* Create / Edit Order Drawer */}
       <Drawer anchor="right" open={createDialogVisible} onClose={() => !saving && setCreateDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
         <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>Create New Order</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>{isEdit ? 'Edit Order' : 'Create New Order'}</Typography>
           <IconButton onClick={() => setCreateDialogVisible(false)} size="small" disabled={saving}><CloseIcon fontSize="small" /></IconButton>
         </Box>
 
         <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3.5 }}>
-          {/* Customer Section */}
-          <Box>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>1. Customer Details</Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Autocomplete
-                freeSolo
-                options={customerSuggestions}
-                getOptionLabel={(o) => typeof o === 'string' ? o : o.phone?.replace(/^\+84/, '0') || ''}
-                filterOptions={(x) => x}
-                inputValue={customerQuery}
-                onInputChange={(e, v) => { setCustomerQuery(v); setCustomerPhone(v); searchCustomer(v); }}
-                onChange={(e, v) => {
-                  if (v && typeof v !== 'string') {
-                    setCustomerPhone(v.phone?.replace(/^\+84/, '0') || '');
-                    setCustomerName(v.name || '');
-                    setCustomerAddress(v.address || '');
-                    setCustomerQuery(v.phone?.replace(/^\+84/, '0') || '');
-                  }
-                }}
-                renderOption={(props, o) => (
-                  <Box component="li" {...props} key={o._id} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, width: '100%', py: 1 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>{o.name}</Typography>
-                    <Typography variant="body2" color="primary" sx={{ fontWeight: 600 }}>{o.phone?.replace(/^\+84/, '0')}</Typography>
-                  </Box>
-                )}
-                renderInput={(params) => <TextField {...params} label="Phone Number *" size="medium" placeholder="Search by phone..." helperText="Will auto-fill known customers. Edits below will update profile." />}
-              />
-              <Grid container spacing={2}>
-                <Grid size={12}><TextField label="Full Name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} fullWidth size="small" /></Grid>
-                <Grid size={12}><TextField label="Address (Optional)" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} fullWidth size="small" placeholder="Delivery/pickup address" /></Grid>
-              </Grid>
-            </Box>
-          </Box>
-
-          <Divider />
-
-          {/* Items Section */}
-          <Box>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>2. Selected Order Items</Typography>
-              <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setAddItemsDrawerVisible(true)} sx={{ py: 0.25, fontSize: '0.75rem' }}>
-                {items.length > 0 ? 'Edit Items' : 'Add Items'}
-              </Button>
-            </Box>
-
-            {items.length === 0 ? (
-              <Box sx={{ p: 4, textAlign: 'center', border: 1, borderColor: 'divider', borderRadius: 2, borderStyle: 'dashed' }}>
-                <Typography variant="body2" color="text.secondary">No items added yet.</Typography>
-                <Button variant="text" size="small" onClick={() => setAddItemsDrawerVisible(true)} sx={{ mt: 1 }}>Browse Services</Button>
+          {/* Customer & Items: only editable for pending orders or new order */}
+          {(!isEdit || editStatus === 'pending') && (<>
+            {/* Customer Section */}
+            <Box>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>1. Customer Details</Typography>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <Autocomplete
+                  freeSolo
+                  options={customerSuggestions}
+                  getOptionLabel={(o) => typeof o === 'string' ? o : o.phone?.replace(/^\+84/, '0') || ''}
+                  filterOptions={(x) => x}
+                  inputValue={customerQuery}
+                  onInputChange={(e, v) => { setCustomerQuery(v); setCustomerPhone(v); searchCustomer(v); }}
+                  onChange={(e, v) => {
+                    if (v && typeof v !== 'string') {
+                      setCustomerPhone(v.phone?.replace(/^\+84/, '0') || '');
+                      setCustomerName(v.name || '');
+                      setCustomerAddress(v.address || '');
+                      setCustomerQuery(v.phone?.replace(/^\+84/, '0') || '');
+                    }
+                  }}
+                  renderOption={(props, o) => (
+                    <Box component="li" {...props} key={o._id} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2, width: '100%', py: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 500 }}>{o.name}</Typography>
+                      <Typography variant="body2" color="primary" sx={{ fontWeight: 600 }}>{o.phone?.replace(/^\+84/, '0')}</Typography>
+                    </Box>
+                  )}
+                  renderInput={(params) => <TextField {...params} label="Phone Number *" size="medium" placeholder="Search by phone..." helperText="Will auto-fill known customers. Edits below will update profile." />}
+                />
+                <Grid container spacing={2}>
+                  <Grid size={12}><TextField label="Full Name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} fullWidth size="small" /></Grid>
+                  <Grid size={12}><TextField label="Address (Optional)" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} fullWidth size="small" placeholder="Delivery/pickup address" /></Grid>
+                </Grid>
               </Box>
-            ) : (
-              <Box sx={{ mt: 2, p: 2, borderRadius: 2, bgcolor: 'primary.50', border: 1, borderColor: 'primary.100' }}>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
-                  {items.map(it => {
-                    const svcName = services.find(s => s._id === it.serviceId)?.name || 'Service';
-                    return (
-                      <Box key={it.serviceId} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{it.quantity}x {svcName}</Typography>
-                        <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>{fmt(it.totalPrice)}</Typography>
-                      </Box>
-                    );
-                  })}
+            </Box>
+
+            <Divider />
+
+            {/* Items Section */}
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>2. Selected Order Items</Typography>
+                <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setAddItemsDrawerVisible(true)} sx={{ py: 0.25, fontSize: '0.75rem' }}>
+                  {items.length > 0 ? 'Edit Items' : 'Add Items'}
+                </Button>
+              </Box>
+
+              {items.length === 0 ? (
+                <Box sx={{ p: 4, textAlign: 'center', border: 1, borderColor: 'divider', borderRadius: 2, borderStyle: 'dashed' }}>
+                  <Typography variant="body2" color="text.secondary">No items added yet.</Typography>
+                  <Button variant="text" size="small" onClick={() => setAddItemsDrawerVisible(true)} sx={{ mt: 1 }}>Browse Services</Button>
                 </Box>
-              </Box>
-            )}
-          </Box>
+              ) : (
+                <Box sx={{ mt: 2, p: 2, borderRadius: 2, bgcolor: 'primary.50', border: 1, borderColor: 'primary.100' }}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
+                    {items.map(it => {
+                      const svcName = services.find(s => s._id === it.serviceId)?.name || 'Service';
+                      return (
+                        <Box key={it.serviceId} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{it.quantity}x {svcName}</Typography>
+                          <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>{fmt(it.totalPrice)}</Typography>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                </Box>
+              )}
+            </Box>
+          </>)}
 
           <Divider />
 
           <Box>
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>3. Additional Details</Typography>
-            <TextField label="Order Notes" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Special instructions or preferences..." fullWidth size="small" multiline rows={2} />
+            {/* Status-change-only edit: show only status select */}
+            {isEdit && editStatus !== 'pending' ? (
+              <>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>Change Order Status</Typography>
+                <TextField
+                  select
+                  label="Order Status"
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value)}
+                  size="small"
+                  fullWidth
+                  helperText="Updating status will take effect immediately after confirmation."
+                >
+                  <MenuItem value="pending">Pending</MenuItem>
+                  <MenuItem value="completed">Completed</MenuItem>
+                  <MenuItem value="deleted">Deleted</MenuItem>
+                </TextField>
+              </>
+            ) : (
+              <>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 2, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '0.75rem' }}>3. Additional Details</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <TextField label="Order Notes" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Special instructions or preferences..." fullWidth size="small" multiline rows={2} />
+                  {isEdit && (
+                    <TextField
+                      select
+                      label="Order Status"
+                      value={editStatus}
+                      onChange={(e) => setEditStatus(e.target.value)}
+                      size="small"
+                      fullWidth
+                      helperText="Change the current status of this order."
+                    >
+                      <MenuItem value="pending">Pending</MenuItem>
+                      <MenuItem value="completed">Completed</MenuItem>
+                      <MenuItem value="deleted">Deleted</MenuItem>
+                    </TextField>
+                  )}
+                </Box>
+              </>
+            )}
           </Box>
 
         </Box>
@@ -287,7 +390,7 @@ export default function OrderList() {
           </Box>
           <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
             <Button onClick={() => setCreateDialogVisible(false)} disabled={saving} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
-            <Button variant="contained" onClick={handleCreateOrder} disabled={saving} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{saving ? 'Creating...' : 'Create Order'}</Button>
+            <Button variant="contained" onClick={handleCreateOrder} disabled={saving} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Order'}</Button>
           </Box>
         </Box>
       </Drawer>
@@ -345,34 +448,69 @@ export default function OrderList() {
       </Drawer>
 
       <Dialog open={confirmCreateOpen} onClose={() => !saving && setConfirmCreateOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 700 }}>Confirm Order Details</DialogTitle>
+        <DialogTitle sx={{ fontWeight: 700 }}>
+          {isEdit ? 'Confirm Status Change' : 'Confirm Order Details'}
+        </DialogTitle>
         <DialogContent dividers>
-          <DialogContentText sx={{ mb: 2, color: 'text.primary', fontSize: '0.9rem' }}>
-            Please verify the order information for <Box component="span" sx={{ fontWeight: 600, color: 'primary.main' }}>{customerName}</Box> ({customerPhone}) before creating the order.
-          </DialogContentText>
-          <Box sx={{ p: 2, bgcolor: 'primary.50', borderRadius: 2, border: 1, borderColor: 'primary.100' }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1.5 }}>
-              {items.map(it => {
-                const svcName = services.find(s => s._id === it.serviceId)?.name || 'Service';
-                return (
-                  <Box key={it.serviceId} sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Typography variant="body2" color="text.secondary">{it.quantity}x {svcName}</Typography>
-                    <Typography variant="body2" sx={{ fontWeight: 500 }}>{fmt(it.totalPrice)}</Typography>
-                  </Box>
-                );
-              })}
+          {isEdit ? (
+            // Status-change confirmation
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <DialogContentText sx={{ color: 'text.primary', fontSize: '0.9rem' }}>
+                You are about to change the status of order <Box component="span" sx={{ fontWeight: 700, color: 'primary.main' }}>#{editOrderId?.slice(-6).toUpperCase()}</Box> for <Box component="span" sx={{ fontWeight: 600 }}>{customerName}</Box> to:
+              </DialogContentText>
+              <Box sx={{
+                p: 2, borderRadius: 2, textAlign: 'center', border: 2,
+                borderColor: editStatus === 'completed' ? 'success.main' : editStatus === 'deleted' ? 'error.main' : 'warning.main',
+                bgcolor: editStatus === 'completed' ? 'success.50' : editStatus === 'deleted' ? 'error.50' : 'warning.50'
+              }}>
+                <Typography variant="h6" sx={{
+                  fontWeight: 700,
+                  color: editStatus === 'completed' ? 'success.dark' : editStatus === 'deleted' ? 'error.dark' : 'warning.dark'
+                }}>
+                  {editStatus.toUpperCase()}
+                </Typography>
+                <Typography variant="caption" sx={{
+                  color: editStatus === 'completed' ? 'success.dark' : editStatus === 'deleted' ? 'error.dark' : 'warning.dark'
+                }}>
+                  {editStatus === 'completed' && 'Order will be marked as completed.'}
+                  {editStatus === 'pending' && 'Order will be moved back to pending.'}
+                  {editStatus === 'deleted' && 'Order will be marked as deleted. This can be reversed.'}
+                </Typography>
+              </Box>
             </Box>
-            <Divider sx={{ my: 1, borderColor: 'primary.100', borderStyle: 'dashed' }} />
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Typography variant="body2" color="text.secondary">Grand Total</Typography>
-              <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>{fmt(grandTotal)}</Typography>
-            </Box>
-          </Box>
+          ) : (
+            // New order confirmation
+            <>
+              <DialogContentText sx={{ mb: 2, color: 'text.primary', fontSize: '0.9rem' }}>
+                Please verify the order information for <Box component="span" sx={{ fontWeight: 600, color: 'primary.main' }}>{customerName}</Box> ({customerPhone}) before creating the order.
+              </DialogContentText>
+              <Box sx={{ p: 2, bgcolor: 'primary.50', borderRadius: 2, border: 1, borderColor: 'primary.100' }}>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1.5 }}>
+                  {items.map(it => {
+                    const svcName = services.find(s => s._id === it.serviceId)?.name || 'Service';
+                    return (
+                      <Box key={it.serviceId} sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2" color="text.secondary">{it.quantity}x {svcName}</Typography>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>{fmt(it.totalPrice)}</Typography>
+                      </Box>
+                    );
+                  })}
+                </Box>
+                <Divider sx={{ my: 1, borderColor: 'primary.100', borderStyle: 'dashed' }} />
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Typography variant="body2" color="text.secondary">Grand Total</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700, color: 'primary.main' }}>{fmt(grandTotal)}</Typography>
+                </Box>
+              </Box>
+            </>
+          )}
         </DialogContent>
         <DialogActions sx={{ p: 2, bgcolor: 'grey.50', borderTop: 1, borderColor: 'divider' }}>
           <Button onClick={() => setConfirmCreateOpen(false)} disabled={saving} color="inherit">Cancel</Button>
-          <Button onClick={executeCreateOrder} variant="contained" disabled={saving} disableElevation>
-            {saving ? 'Creating...' : 'Confirm & Create'}
+          <Button onClick={executeSaveOrder} variant="contained" disabled={saving} disableElevation
+            color={isEdit && editStatus === 'deleted' ? 'error' : isEdit && editStatus === 'completed' ? 'success' : 'primary'}
+          >
+            {saving ? 'Saving...' : isEdit ? `Confirm ${editStatus.charAt(0).toUpperCase() + editStatus.slice(1)}` : 'Confirm & Create'}
           </Button>
         </DialogActions>
       </Dialog>

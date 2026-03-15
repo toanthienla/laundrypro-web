@@ -29,6 +29,9 @@ const userApi = {
   createStaff: (data) => {
     return axiosClient.post('/v1/users/users/staff', data);
   },
+  updateStaff: (id, data) => {
+    return axiosClient.put(`/v1/users/users/${id}`, data);
+  },
   updateUserRole: (id, role) => {
     return axiosClient.patch(`/v1/users/users/${id}/role`, { role });
   },
@@ -37,6 +40,11 @@ const userApi = {
   },
   deleteUser: (id) => {
     return axiosClient.delete(`/v1/users/users/${id}`);
+  },
+
+  // Stats
+  getUserStats: () => {
+    return axiosClient.get('/v1/users/stats');
   }
 };
 

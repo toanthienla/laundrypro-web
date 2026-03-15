@@ -27,8 +27,8 @@ const orderApi = {
     // { customerPhone, customerName, items: [{ serviceId, quantity, unitPrice, note }], note, customerAddress }
     return axiosClient.post('/v1/orders', data);
   },
-  updateOrder: (id, note) => {
-    return axiosClient.put(`/v1/orders/${id}`, { note });
+  updateOrder: (id, data) => {
+    return axiosClient.put(`/v1/orders/${id}`, data);
   },
   updateOrderStatus: (id, status) => {
     return axiosClient.patch(`/v1/orders/${id}/status`, { status });

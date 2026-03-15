@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import serviceApi from '~/apis/serviceApi';
 
@@ -25,11 +26,15 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import InboxIcon from '@mui/icons-material/Inbox';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import CloseIcon from '@mui/icons-material/Close';
 import SearchIcon from '@mui/icons-material/Search';
 import InputAdornment from '@mui/material/InputAdornment';
 
 export default function ServiceList() {
+  const { user } = useOutletContext();
+  const isAdmin = user?.role === 'admin';
+
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,6 +53,10 @@ export default function ServiceList() {
   const [formRemoveImage, setFormRemoveImage] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  
+  const [viewDialogVisible, setViewDialogVisible] = useState(false);
+  const [viewTarget, setViewTarget] = useState(null);
+  
   const fileInputRef = useRef(null);
 
   useEffect(() => { fetchCategories(); }, []);
@@ -56,6 +65,7 @@ export default function ServiceList() {
       fetchServices();
     }, 500);
     return () => clearTimeout(delayDebounceFn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
   const fetchServices = async () => { try { setLoading(true); const params = { limit: 500 }; if (searchQuery) params.search = searchQuery; const r = await serviceApi.getServices(params); const d = r.data; setServices(Array.isArray(d) ? d : d.services || []); } catch { toast.error('Failed to fetch services.'); } finally { setLoading(false); } };
@@ -73,6 +83,9 @@ export default function ServiceList() {
   };
   const confirmDel = (s) => { setDeleteTarget(s); setDeleteConfirmOpen(true); };
   const handleDelete = async () => { try { await serviceApi.deleteService(deleteTarget._id); toast.success('Deleted'); setDeleteConfirmOpen(false); fetchServices(); } catch { toast.error('Failed'); } };
+  
+  const openViewDialog = (s) => { setViewTarget(s); setViewDialogVisible(true); };
+  
   const fmt = (v) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v);
 
   const columns = [
@@ -82,7 +95,7 @@ export default function ServiceList() {
     { field: 'price', headerName: 'Price', minWidth: 110, flex: 0.8, renderCell: (p) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{fmt(p.value)}</Typography> },
     { field: 'unit', headerName: 'Unit', minWidth: 70, flex: 0.5, renderCell: (p) => <Typography variant="body2" color="text.secondary">{p.value}</Typography> },
     { field: 'active', headerName: 'Status', minWidth: 80, flex: 0.5, renderCell: (p) => <Typography variant="body2" sx={{ color: p.value ? '#16a34a' : '#6b7280', fontWeight: 600, fontSize: '0.8rem' }}>{p.value ? 'ACTIVE' : 'HIDDEN'}</Typography> },
-    { field: 'actions', headerName: '', width: 80, sortable: false, renderCell: (p) => (<Box sx={{ display: 'flex', gap: 0.5 }}><IconButton size="small" onClick={() => openEditDialog(p.row)}><EditIcon fontSize="small" /></IconButton><IconButton size="small" onClick={() => confirmDel(p.row)}><DeleteIcon fontSize="small" /></IconButton></Box>) },
+    { field: 'actions', headerName: '', width: 100, sortable: false, renderCell: (p) => (<Box sx={{ display: 'flex', gap: 0.5 }}><IconButton size="small" onClick={() => openViewDialog(p.row)}><VisibilityIcon fontSize="small" /></IconButton>{isAdmin && (<><IconButton size="small" onClick={() => openEditDialog(p.row)}><EditIcon fontSize="small" /></IconButton><IconButton size="small" onClick={() => confirmDel(p.row)}><DeleteIcon fontSize="small" /></IconButton></>)}</Box>) },
   ];
 
   if (loading && services.length === 0) return <Box sx={{ display: 'flex', justifyContent: 'center', py: 10 }}><CircularProgress size={28} /></Box>;
@@ -93,7 +106,7 @@ export default function ServiceList() {
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 3 }}>
         <Box><Typography variant="h5" sx={{ fontWeight: 700 }}>Services</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Manage offerings, pricing, and availability.</Typography></Box>
-        <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreateDialog} disableElevation>Add Service</Button>
+        {isAdmin && <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreateDialog} disableElevation>Add Service</Button>}
       </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {[{ l: 'Total', v: services.length }, { l: 'Active', v: services.filter(s => s.active).length }, { l: 'Hidden', v: services.filter(s => !s.active).length }].map((s) => (
@@ -153,6 +166,37 @@ export default function ServiceList() {
           <Button variant="contained" color="error" onClick={handleDelete} disableElevation sx={{ fontWeight: 600, px: 3, borderRadius: 2 }}>Delete</Button>
         </DialogActions>
       </Dialog>
+
+      <Drawer anchor="right" open={viewDialogVisible} onClose={() => setViewDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
+        <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Service Details</Typography>
+          <IconButton onClick={() => setViewDialogVisible(false)} size="small"><CloseIcon fontSize="small" /></IconButton>
+        </Box>
+        {viewTarget && (
+          <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {viewTarget.image && (
+                <Box component="img" src={viewTarget.image} alt={viewTarget.name} sx={{ width: '100%', height: 200, objectFit: 'cover', borderRadius: 2 }} />
+            )}
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Basic Info</Typography>
+              <Grid container spacing={2}>
+                <Grid size={12}><Typography variant="caption" color="text.secondary">Name</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.name}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Category</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.category}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Status</Typography><Typography variant="body2" sx={{ color: viewTarget.active ? '#16a34a' : '#6b7280', fontWeight: 600, fontSize: '0.8rem', mt: 0.5 }}>{viewTarget.active ? 'ACTIVE' : 'HIDDEN'}</Typography></Grid>
+              </Grid>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Pricing configuration</Typography>
+              <Grid container spacing={2}>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Price</Typography><Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>{fmt(viewTarget.price)}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Unit</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.unit}</Typography></Grid>
+              </Grid>
+            </Paper>
+          </Box>
+        )}
+      </Drawer>
     </Box>
   );
 }

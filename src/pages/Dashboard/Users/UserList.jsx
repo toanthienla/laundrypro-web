@@ -20,10 +20,12 @@ import { DataGrid } from '@mui/x-data-grid';
 import Drawer from '@mui/material/Drawer';
 
 import EditIcon from '@mui/icons-material/Edit';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import CloseIcon from '@mui/icons-material/Close';
+import SettingsIcon from '@mui/icons-material/Settings';
 
 export default function UserList() {
   const [users, setUsers] = useState([]);
@@ -39,13 +41,19 @@ export default function UserList() {
   const [formPhone, setFormPhone] = useState('');
   const [formEmail, setFormEmail] = useState('');
 
-  // Edit dialog (role + status)
+  // Edit Details + Status Dialog
   const [editDialogVisible, setEditDialogVisible] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
-  const [editRole, setEditRole] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
   const [editStatus, setEditStatus] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
+  const [viewDialogVisible, setViewDialogVisible] = useState(false);
+  const [viewTarget, setViewTarget] = useState(null);
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchUsers(); }, [paginationModel, searchValue]);
 
   const fetchUsers = async () => {
@@ -72,24 +80,40 @@ export default function UserList() {
     finally { setSaving(false); }
   };
 
-  // --- Edit Role & Status ---
-  const openEditDialog = (u) => { setEditTarget(u); setEditRole(u.role); setEditStatus(u.status || 'active'); setEditDialogVisible(true); };
+  // --- Edit Staff ---
+  const openEditDialog = (u) => {
+    setEditTarget(u);
+    setEditName(u.name || '');
+    setEditPhone(u.phone?.replace(/^\+84/, '0') || '');
+    setEditEmail(u.email || '');
+    setEditStatus(u.status || 'active');
+    setEditDialogVisible(true);
+  };
   const handleSaveEdit = async () => {
     if (!editTarget) return;
     try {
       setEditSaving(true);
+
       const promises = [];
-      if (editRole !== editTarget.role) promises.push(userApi.updateUserRole(editTarget._id, editRole));
+
+      // Detail updates
+      promises.push(userApi.updateStaff(editTarget._id, {
+        name: editName,
+        phone: editPhone.startsWith('0') ? editPhone.replace(/^0/, '+84') : editPhone,
+        email: editEmail || undefined
+      }));
+
+      // Status updates
       if (editStatus !== (editTarget.status || 'active')) promises.push(userApi.updateUserStatus(editTarget._id, editStatus));
-      if (promises.length === 0) { setEditDialogVisible(false); return; }
+
       await Promise.all(promises);
-      toast.success('User updated.');
+      toast.success('Staff account updated.');
       setEditDialogVisible(false); fetchUsers();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed.'); }
     finally { setEditSaving(false); }
   };
-
-  // --- Edit Role & Status ---
+  
+  const openViewDialog = (u) => { setViewTarget(u); setViewDialogVisible(true); };
 
   const columns = [
     { field: 'name', headerName: 'Name', minWidth: 140, flex: 1.2 },
@@ -99,7 +123,7 @@ export default function UserList() {
     { field: 'status', headerName: 'Status', minWidth: 90, flex: 0.6, renderCell: (p) => <Typography variant="body2" sx={{ color: (p.value || 'active') === 'active' ? '#16a34a' : '#dc2626', fontWeight: 600, fontSize: '0.8rem' }}>{(p.value || 'ACTIVE').toUpperCase()}</Typography> },
     { field: 'lastLogin', headerName: 'Last Login', minWidth: 130, flex: 1, renderCell: (p) => <Typography variant="body2" color="text.secondary">{p.value ? moment(p.value).format('DD/MM/YY HH:mm') : '\u2014'}</Typography> },
     { field: 'createdAt', headerName: 'Created', minWidth: 90, flex: 0.6, renderCell: (p) => <Typography variant="body2" color="text.secondary">{moment(p.value).format('DD/MM/YY')}</Typography> },
-    { field: 'actions', headerName: '', width: 80, sortable: false, renderCell: (p) => (<Box sx={{ display: 'flex', gap: 0.5 }}><IconButton size="small" onClick={() => openEditDialog(p.row)}><EditIcon fontSize="small" /></IconButton></Box>) },
+    { field: 'actions', headerName: '', width: 80, sortable: false, renderCell: (p) => (<Box sx={{ display: 'flex', gap: 0.5 }}><IconButton size="small" onClick={() => openViewDialog(p.row)}><VisibilityIcon fontSize="small" /></IconButton><IconButton size="small" onClick={() => openEditDialog(p.row)}><EditIcon fontSize="small" /></IconButton></Box>) },
   ];
 
   return (
@@ -135,30 +159,64 @@ export default function UserList() {
         </Box>
       </Drawer>
 
-      {/* Edit Role & Status Dialog */}
+      {/* Edit Staff Dialog */}
       <Drawer anchor="right" open={editDialogVisible} onClose={() => !editSaving && setEditDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
         <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>Edit User</Typography>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Edit Staff Account</Typography>
           <IconButton onClick={() => setEditDialogVisible(false)} size="small" disabled={editSaving}><CloseIcon fontSize="small" /></IconButton>
         </Box>
         <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField label="Full Name *" value={editName} onChange={(e) => setEditName(e.target.value)} fullWidth size="medium" />
+            <TextField label="Phone *" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} fullWidth size="medium" placeholder="0901234567" disabled={true} helperText="Phone number cannot be changed" />
+            <TextField label="Email (Optional)" type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} fullWidth size="medium" placeholder="staff@laundrypro.com" />
+          </Box>
+
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>{editTarget?.name}</Typography>
-            <Typography variant="caption" color="text.secondary">{editTarget?.phone?.replace(/^\+84/, '0')}</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Account Status</Typography>
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField select label="Status" value={editStatus} onChange={(e) => setEditStatus(e.target.value)} fullWidth size="medium">
+                <MenuItem value="active">Active - Can log in</MenuItem>
+                <MenuItem value="suspended">Suspended - Cannot log in</MenuItem>
+              </TextField>
+            </Box>
           </Paper>
-          <TextField select label="Role" value={editRole} onChange={(e) => setEditRole(e.target.value)} fullWidth size="medium">
-            <MenuItem value="staff">Staff</MenuItem>
-            <MenuItem value="admin">Admin</MenuItem>
-          </TextField>
-          <TextField select label="Account Status" value={editStatus} onChange={(e) => setEditStatus(e.target.value)} fullWidth size="medium">
-            <MenuItem value="active">Active</MenuItem>
-            <MenuItem value="suspended">Suspended</MenuItem>
-          </TextField>
         </Box>
         <Box sx={{ p: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end', gap: 1.5, bgcolor: 'grey.50' }}>
           <Button onClick={() => setEditDialogVisible(false)} disabled={editSaving} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
           <Button variant="contained" onClick={handleSaveEdit} disabled={editSaving} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{editSaving ? 'Saving...' : 'Save Changes'}</Button>
         </Box>
+      </Drawer>
+
+      <Drawer anchor="right" open={viewDialogVisible} onClose={() => setViewDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
+        <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Staff Details</Typography>
+          <IconButton onClick={() => setViewDialogVisible(false)} size="small"><CloseIcon fontSize="small" /></IconButton>
+        </Box>
+        {viewTarget && (
+          <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Basic Details</Typography>
+              <Grid container spacing={2}>
+                <Grid size={12}><Typography variant="caption" color="text.secondary">Name</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.name}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Phone</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.phone?.replace(/^\+84/, '0')}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Email</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.email || '\u2014'}</Typography></Grid>
+              </Grid>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Permissions & Status</Typography>
+              <Grid container spacing={2}>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Role</Typography><Typography variant="body2" sx={{ fontWeight: 600, fontSize: '0.8rem', mt: 0.5, textTransform: 'uppercase' }}>{viewTarget.role}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Account Status</Typography><Typography variant="body2" sx={{ color: (viewTarget.status || 'active') === 'active' ? '#16a34a' : '#dc2626', fontWeight: 600, fontSize: '0.8rem', mt: 0.5 }}>{(viewTarget.status || 'ACTIVE').toUpperCase()}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Verification</Typography><Typography variant="body2" sx={{ color: viewTarget.isVerified ? '#16a34a' : '#6b7280', fontWeight: 600, fontSize: '0.8rem', mt: 0.5 }}>{viewTarget.isVerified ? 'VERIFIED' : 'UNVERIFIED'}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Joined</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{moment(viewTarget.createdAt).format('DD/MM/YYYY')}</Typography></Grid>
+                <Grid size={12}><Typography variant="caption" color="text.secondary">Last Login</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.lastLogin ? moment(viewTarget.lastLogin).format('DD/MM/YYYY HH:mm') : '\u2014'}</Typography></Grid>
+              </Grid>
+            </Paper>
+          </Box>
+        )}
       </Drawer>
     </Box>
   );

@@ -23,6 +23,7 @@ import Drawer from '@mui/material/Drawer';
 
 import EditIcon from '@mui/icons-material/Edit';
 import SearchIcon from '@mui/icons-material/Search';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import CloseIcon from '@mui/icons-material/Close';
 import InputAdornment from '@mui/material/InputAdornment';
 
@@ -39,6 +40,9 @@ export default function PaymentList() {
   const [trxRef, setTrxRef] = useState('');
   const [updating, setUpdating] = useState(false);
 
+  const [viewDialogVisible, setViewDialogVisible] = useState(false);
+  const [viewTarget, setViewTarget] = useState(null);
+
   const navigate = useNavigate();
 
   const statusOpts = ['pending', 'paid', 'failed', 'refunded'];
@@ -48,6 +52,7 @@ export default function PaymentList() {
       fetchPayments();
     }, 500);
     return () => clearTimeout(delayDebounceFn);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paginationModel, searchQuery]);
   const fetchPayments = async () => {
     try { setLoading(true); const params = { page: paginationModel.page + 1, limit: paginationModel.pageSize }; if (searchQuery) params.search = searchQuery; const r = await paymentApi.getAllPayments(params); setPayments(r.data.payments || []); setTotalRecords(r.data.pagination?.total || 0); } catch { toast.error('Failed to fetch payments'); } finally { setLoading(false); }
@@ -56,6 +61,8 @@ export default function PaymentList() {
   const submitStatusUpdate = async () => {
     try { setUpdating(true); await paymentApi.updatePaymentStatus(selectedPayment._id, { status: newStatus, transactionRef: trxRef }); toast.success('Updated'); setStatusDialogVisible(false); fetchPayments(); } catch { toast.error('Failed'); } finally { setUpdating(false); }
   };
+
+  const openViewDialog = (p) => { setViewTarget(p); setViewDialogVisible(true); };
 
   const statusStyle = (s) => ({ color: { paid: '#16a34a', pending: '#d97706', failed: '#dc2626', refunded: '#2563eb' }[s] || '#6b7280', fontWeight: 600, fontSize: '0.8rem' });
   const fmt = (v) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(v);
@@ -67,7 +74,7 @@ export default function PaymentList() {
     { field: 'amount', headerName: 'Amount', minWidth: 100, flex: 0.8, renderCell: (p) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{fmt(p.value)}</Typography> },
     { field: 'method', headerName: 'Method', minWidth: 80, flex: 0.6, renderCell: (p) => <Typography variant="body2" sx={{ textTransform: 'uppercase', fontSize: '0.8rem' }}>{p.value}</Typography> },
     { field: 'status', headerName: 'Status', minWidth: 90, flex: 0.7, renderCell: (p) => <Typography variant="body2" sx={statusStyle(p.value)}>{p.value?.toUpperCase()}</Typography> },
-    { field: 'actions', headerName: '', width: 40, sortable: false, renderCell: (p) => <IconButton size="small" onClick={() => openStatusDialog(p.row)}><EditIcon fontSize="small" /></IconButton> },
+    { field: 'actions', headerName: '', width: 80, sortable: false, renderCell: (p) => (<Box sx={{ display: 'flex', gap: 0.5 }}><IconButton size="small" onClick={() => openViewDialog(p.row)}><VisibilityIcon fontSize="small" /></IconButton><IconButton size="small" onClick={() => openStatusDialog(p.row)}><EditIcon fontSize="small" /></IconButton></Box>) },
   ];
 
   return (
@@ -98,6 +105,40 @@ export default function PaymentList() {
           <Button onClick={() => setStatusDialogVisible(false)} disabled={updating} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
           <Button variant="contained" onClick={submitStatusUpdate} disabled={updating} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{updating ? 'Saving...' : 'Save Changes'}</Button>
         </Box>
+      </Drawer>
+
+      <Drawer anchor="right" open={viewDialogVisible} onClose={() => setViewDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
+        <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+          <Typography variant="h6" sx={{ fontWeight: 600 }}>Payment Details</Typography>
+          <IconButton onClick={() => setViewDialogVisible(false)} size="small"><CloseIcon fontSize="small" /></IconButton>
+        </Box>
+        {viewTarget && (
+          <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Transaction Info</Typography>
+              <Grid container spacing={2}>
+                <Grid size={12}><Typography variant="caption" color="text.secondary">Transaction ID</Typography><Typography variant="body1" sx={{ fontWeight: 500, fontFamily: 'monospace' }}>{viewTarget._id}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Date</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{moment(viewTarget.createdAt).format('DD/MM/YYYY HH:mm')}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Amount</Typography><Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>{fmt(viewTarget.amount)}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Method</Typography><Typography variant="body1" sx={{ fontWeight: 500, textTransform: 'uppercase' }}>{viewTarget.method}</Typography></Grid>
+                <Grid size={6}><Typography variant="caption" color="text.secondary">Status </Typography><Typography variant="body2" sx={{ ...statusStyle(viewTarget.status), display: 'inline-block', mt: 0.5 }}>{viewTarget.status?.toUpperCase()}</Typography></Grid>
+                {viewTarget.transactionRef && <Grid size={12}><Typography variant="caption" color="text.secondary">Reference Note</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.transactionRef}</Typography></Grid>}
+              </Grid>
+            </Paper>
+
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
+              <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Order Related</Typography>
+              <Grid container spacing={2}>
+                <Grid size={12}>
+                  <Typography variant="caption" color="text.secondary">Order ID</Typography>
+                  <Box sx={{ mt: 0.5 }}>
+                    <Button variant="outlined" size="small" onClick={() => navigate(`/dashboard/orders/${viewTarget.orderId?._id || viewTarget.orderId}`)} sx={{ fontWeight: 600, fontFamily: 'monospace' }}>#{String(viewTarget.orderId?._id || viewTarget.orderId).substring(String(viewTarget.orderId?._id || viewTarget.orderId).length - 6).toUpperCase()}</Button>
+                  </Box>
+                </Grid>
+              </Grid>
+            </Paper>
+          </Box>
+        )}
       </Drawer>
     </Box>
   );
