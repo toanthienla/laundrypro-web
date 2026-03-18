@@ -60,6 +60,48 @@ export default function OrderList() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [customerName, setCustomerName] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
+  const [summary, setSummary] = useState({ total: 0, pending: 0, completed: 0, deleted: 0 });
+
+  const getServiceId = (service) => {
+    if (!service) return null;
+    if (typeof service === 'string') return service;
+    if (typeof service === 'object' && service._id) return String(service._id);
+    if (typeof service?.toString === 'function') {
+      const value = service.toString();
+      return value !== '[object Object]' ? value : null;
+    }
+    return null;
+  };
+
+  const normalizeOrderItem = (item) => ({
+    serviceId: getServiceId(item.serviceId),
+    serviceName: item.serviceName || item.serviceId?.name || 'Service',
+    serviceCategory: item.serviceCategory || item.serviceId?.category || '',
+    serviceUnit: item.serviceUnit || item.serviceId?.unit || 'unit',
+    quantity: item.quantity,
+    unitPrice: item.unitPrice,
+    totalPrice: item.totalPrice
+  });
+
+  const mergeServices = (baseServices, orderItems = []) => {
+    const merged = new Map(baseServices.map(service => [String(service._id), service]));
+
+    orderItems.forEach((item) => {
+      const serviceId = getServiceId(item.serviceId);
+      if (!serviceId || merged.has(serviceId)) return;
+
+      merged.set(serviceId, {
+        _id: serviceId,
+        name: item.serviceName || item.serviceId?.name || 'Service',
+        category: item.serviceCategory || item.serviceId?.category || '',
+        price: item.servicePrice ?? item.unitPrice ?? 0,
+        unit: item.serviceUnit || item.serviceId?.unit || 'unit',
+        active: false
+      });
+    });
+
+    return Array.from(merged.values());
+  };
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -70,6 +112,7 @@ export default function OrderList() {
       const res = await orderApi.getAllOrders(params);
       setOrders(res.data.orders || []);
       setTotalRecords(res.data.pagination?.total || 0);
+      if (res.data.stats) setSummary(res.data.stats);
     } catch { toast.error('Failed to fetch orders.'); } finally { setLoading(false); }
   }, [paginationModel.page, paginationModel.pageSize, searchQuery, statusFilter]);
 
@@ -80,9 +123,14 @@ export default function OrderList() {
     return () => clearTimeout(delayDebounceFn);
   }, [fetchOrders]);
 
-  const loadServices = async () => {
-    if (services.length > 0) return;
-    try { const res = await serviceApi.getServices({ active: true }); const d = res.data; setServices(Array.isArray(d) ? d : d.services || []); } catch { toast.error('Could not load services'); }
+  const loadServices = async (orderItems = []) => {
+    if (services.length > 0 && orderItems.length === 0) return;
+    try {
+      const res = await serviceApi.getServices({ active: true });
+      const d = res.data;
+      const activeServices = Array.isArray(d) ? d : d.services || [];
+      setServices(mergeServices(activeServices, orderItems));
+    } catch { toast.error('Could not load services'); }
   };
 
   const searchCustomer = async (query) => {
@@ -94,18 +142,29 @@ export default function OrderList() {
     } catch { setCustomerSuggestions([]); }
   };
 
-  const openCreateDialog = async () => {
-    setCreateDialogVisible(true);
-    loadServices();
-  };
-
   const clearDraft = () => {
     setCustomerQuery(''); setCustomerPhone(''); setCustomerName(''); setCustomerAddress(''); setNote(''); setItems([]); setServiceSearchQuery('');
     setIsEdit(false); setEditOrderId(null); setEditStatus('pending');
   };
 
+  const closeCreateDialog = () => {
+    if (saving) return;
+    setCreateDialogVisible(false);
+    setAddItemsDrawerVisible(false);
+    setConfirmCreateOpen(false);
+    clearDraft();
+  };
+
+  const openCreateDialog = async () => {
+    clearDraft();
+    setAddItemsDrawerVisible(false);
+    setConfirmCreateOpen(false);
+    setCreateDialogVisible(true);
+    loadServices();
+  };
+
   const handleItemQtyChange = (svc, delta) => {
-    const existingIdx = items.findIndex(i => i.serviceId === svc._id);
+    const existingIdx = items.findIndex(i => getServiceId(i.serviceId) === svc._id);
     let newItems = [...items];
     if (existingIdx >= 0) {
       let newQty = newItems[existingIdx].quantity + delta;
@@ -131,7 +190,7 @@ export default function OrderList() {
       return;
     }
     if (!customerPhone || !customerName) { toast.warn('Customer info is required.'); return; }
-    if (items.length === 0 || items.some(i => !i.serviceId)) { toast.warn('Add at least one valid item.'); return; }
+    if (items.length === 0 || items.some(i => !getServiceId(i.serviceId))) { toast.warn('Add at least one valid item.'); return; }
     setConfirmCreateOpen(true);
   };
 
@@ -144,7 +203,7 @@ export default function OrderList() {
 
         if (isPending) {
           // Full update: items + customer + note
-          const payload = { customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice })) };
+          const payload = { customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: getServiceId(i.serviceId), quantity: i.quantity, unitPrice: i.unitPrice })) };
           await orderApi.updateOrder(editOrderId, payload);
         } else {
           // Non-pending: only update note
@@ -156,13 +215,11 @@ export default function OrderList() {
         }
         toast.success('Order updated!');
       } else {
-        const payload = { customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice })) };
+        const payload = { customerPhone: customerPhone.startsWith('0') ? customerPhone.replace(/^0/, '+84') : customerPhone, customerName, customerAddress, note, items: items.map(i => ({ serviceId: getServiceId(i.serviceId), quantity: i.quantity, unitPrice: i.unitPrice })) };
         await orderApi.createOrder(payload);
         toast.success('Order created!');
       }
-      setConfirmCreateOpen(false);
-      setCreateDialogVisible(false);
-      clearDraft();
+      closeCreateDialog();
       fetchOrders();
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed');
@@ -185,13 +242,15 @@ export default function OrderList() {
     setEditStatus(row.status || 'pending');
 
     if (row.orderItems) {
-      setItems(row.orderItems.map(i => ({ serviceId: i.serviceId, quantity: i.quantity, unitPrice: i.unitPrice, totalPrice: i.totalPrice })));
+      const normalizedItems = row.orderItems.map(normalizeOrderItem);
+      setItems(normalizedItems);
+      loadServices(row.orderItems);
     } else {
       setItems([]);
+      loadServices();
     }
 
     setCreateDialogVisible(true);
-    loadServices();
   };
 
 
@@ -229,10 +288,10 @@ export default function OrderList() {
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {[
-          { label: 'Total', value: totalRecords },
-          { label: 'Pending', value: orders.filter(o => o.status === 'pending').length },
-          { label: 'Completed', value: orders.filter(o => o.status === 'completed').length },
-          { label: 'Deleted', value: orders.filter(o => o.status === 'deleted').length },
+          { label: 'Total', value: summary.total || totalRecords },
+          { label: 'Pending', value: summary.pending || orders.filter(o => o.status === 'pending').length },
+          { label: 'Completed', value: summary.completed || orders.filter(o => o.status === 'completed').length },
+          { label: 'Deleted', value: summary.deleted || orders.filter(o => o.status === 'deleted').length },
         ].map((s) => (
           <Grid size={{ xs: 3 }} key={s.label}>
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
@@ -257,10 +316,10 @@ export default function OrderList() {
       </Paper>
 
       {/* Create / Edit Order Drawer */}
-      <Drawer anchor="right" open={createDialogVisible} onClose={() => !saving && setCreateDialogVisible(false)} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
+      <Drawer anchor="right" open={createDialogVisible} onClose={closeCreateDialog} PaperProps={{ sx: { width: { xs: '100%', sm: 500 } } }}>
         <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
           <Typography variant="h6" sx={{ fontWeight: 600 }}>{isEdit ? 'Edit Order' : 'Create New Order'}</Typography>
-          <IconButton onClick={() => setCreateDialogVisible(false)} size="small" disabled={saving}><CloseIcon fontSize="small" /></IconButton>
+          <IconButton onClick={closeCreateDialog} size="small" disabled={saving}><CloseIcon fontSize="small" /></IconButton>
         </Box>
 
         <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3.5 }}>
@@ -320,9 +379,9 @@ export default function OrderList() {
                 <Box sx={{ mt: 2, p: 2, borderRadius: 2, bgcolor: 'primary.50', border: 1, borderColor: 'primary.100' }}>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75 }}>
                     {items.map(it => {
-                      const svcName = services.find(s => s._id === it.serviceId)?.name || 'Service';
+                      const svcName = services.find(s => s._id === getServiceId(it.serviceId))?.name || it.serviceName || 'Service';
                       return (
-                        <Box key={it.serviceId} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Box key={getServiceId(it.serviceId)} sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>{it.quantity}x {svcName}</Typography>
                           <Typography variant="body2" sx={{ fontWeight: 600, color: 'text.primary' }}>{fmt(it.totalPrice)}</Typography>
                         </Box>
@@ -389,7 +448,7 @@ export default function OrderList() {
             <Typography variant="h5" sx={{ fontWeight: 700, color: 'primary.main' }}>{fmt(grandTotal)}</Typography>
           </Box>
           <Box sx={{ display: 'flex', gap: 1.5, justifyContent: 'flex-end' }}>
-            <Button onClick={() => setCreateDialogVisible(false)} disabled={saving} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
+            <Button onClick={closeCreateDialog} disabled={saving} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
             <Button variant="contained" onClick={handleCreateOrder} disabled={saving} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Order'}</Button>
           </Box>
         </Box>
@@ -420,7 +479,7 @@ export default function OrderList() {
               services
                 .filter(svc => svc.name.toLowerCase().includes(serviceSearchQuery.toLowerCase()) || (svc.category && svc.category.toLowerCase().includes(serviceSearchQuery.toLowerCase())))
                 .map(svc => {
-                  const selectedItem = items.find(i => i.serviceId === svc._id);
+                  const selectedItem = items.find(i => getServiceId(i.serviceId) === svc._id);
                   const qty = selectedItem ? selectedItem.quantity : 0;
                   return (
                     <Paper key={svc._id} variant="outlined" sx={{ p: 1.5, borderRadius: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderColor: qty > 0 ? 'primary.main' : 'divider', bgcolor: qty > 0 ? 'primary.50' : 'background.paper', transition: 'all 0.2s' }}>
@@ -473,7 +532,7 @@ export default function OrderList() {
                   color: editStatus === 'completed' ? 'success.dark' : editStatus === 'deleted' ? 'error.dark' : 'warning.dark'
                 }}>
                   {editStatus === 'completed' && 'Order will be marked as completed.'}
-                  {editStatus === 'pending' && 'Order will be moved back to pending.'}
+                  {editStatus === 'pending' && 'Order will be moved to pending.'}
                   {editStatus === 'deleted' && 'Order will be marked as deleted. This can be reversed.'}
                 </Typography>
               </Box>
@@ -487,9 +546,9 @@ export default function OrderList() {
               <Box sx={{ p: 2, bgcolor: 'primary.50', borderRadius: 2, border: 1, borderColor: 'primary.100' }}>
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.75, mb: 1.5 }}>
                   {items.map(it => {
-                    const svcName = services.find(s => s._id === it.serviceId)?.name || 'Service';
+                    const svcName = services.find(s => s._id === getServiceId(it.serviceId))?.name || it.serviceName || 'Service';
                     return (
-                      <Box key={it.serviceId} sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <Box key={getServiceId(it.serviceId)} sx={{ display: 'flex', justifyContent: 'space-between' }}>
                         <Typography variant="body2" color="text.secondary">{it.quantity}x {svcName}</Typography>
                         <Typography variant="body2" sx={{ fontWeight: 500 }}>{fmt(it.totalPrice)}</Typography>
                       </Box>

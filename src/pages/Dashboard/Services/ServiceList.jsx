@@ -56,6 +56,7 @@ export default function ServiceList() {
   
   const [viewDialogVisible, setViewDialogVisible] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
+  const [summary, setSummary] = useState({ total: 0, active: 0, hidden: 0 });
   
   const fileInputRef = useRef(null);
 
@@ -68,7 +69,7 @@ export default function ServiceList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchQuery]);
 
-  const fetchServices = async () => { try { setLoading(true); const params = { limit: 500 }; if (searchQuery) params.search = searchQuery; const r = await serviceApi.getServices(params); const d = r.data; setServices(Array.isArray(d) ? d : d.services || []); } catch { toast.error('Failed to fetch services.'); } finally { setLoading(false); } };
+  const fetchServices = async () => { try { setLoading(true); const params = { limit: 500 }; if (searchQuery) params.search = searchQuery; const r = await serviceApi.getServices(params); const d = r.data; setServices(Array.isArray(d) ? d : d.services || []); if (d?.stats) setSummary(d.stats); } catch { toast.error('Failed to fetch services.'); } finally { setLoading(false); } };
   const fetchCategories = async () => { try { const r = await serviceApi.getCategories(); setCategories((r.data || []).map(c => ({ label: c, value: c }))); } catch (err) { console.error(err); } };
   const resetForm = () => { setFormName(''); setFormPrice(''); setFormUnit(''); setFormCategory(''); setFormActive(true); setFormImageFile(null); setFormCurrentImageUrl(''); setFormRemoveImage(false); setIsEdit(false); setEditId(null); };
   const openCreateDialog = () => { resetForm(); setDialogVisible(true); };
@@ -109,7 +110,7 @@ export default function ServiceList() {
         {isAdmin && <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreateDialog} disableElevation>Add Service</Button>}
       </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {[{ l: 'Total', v: services.length }, { l: 'Active', v: services.filter(s => s.active).length }, { l: 'Hidden', v: services.filter(s => !s.active).length }].map((s) => (
+        {[{ l: 'Total', v: summary.total || services.length }, { l: 'Active', v: summary.active || services.filter(s => s.active).length }, { l: 'Hidden', v: summary.hidden || services.filter(s => !s.active).length }].map((s) => (
           <Grid size={{ xs: 4 }} key={s.l}><Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.l}</Typography><Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>{s.v}</Typography></Paper></Grid>
         ))}
       </Grid>

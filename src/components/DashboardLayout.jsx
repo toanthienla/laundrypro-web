@@ -52,7 +52,7 @@ export default function DashboardLayout() {
   };
 
   const navItems = [
-    { label: 'Overview', icon: <TrendingUpIcon />, path: '/dashboard', exact: true },
+    ...(user?.role === 'admin' ? [{ label: 'Overview', icon: <TrendingUpIcon />, path: '/dashboard', exact: true }] : []),
     { label: 'Orders', icon: <ShoppingBagIcon />, path: '/dashboard/orders' },
     { label: 'Payments', icon: <AccountBalanceWalletIcon />, path: '/dashboard/payments' },
     { label: 'Services', icon: <AppsIcon />, path: '/dashboard/services' },

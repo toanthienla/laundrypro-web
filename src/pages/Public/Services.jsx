@@ -41,7 +41,7 @@ const Services = () => {
       if (search) params.search = search;
       const res = await serviceApi.getServices(params);
       const data = res?.data?.data || res?.data || [];
-      setServices(Array.isArray(data) ? data : []);
+      setServices(Array.isArray(data) ? data : data.services || []);
     } catch (error) {
       console.error('Error fetching services:', error);
     } finally {

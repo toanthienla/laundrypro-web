@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { Navigate, useOutletContext } from 'react-router-dom';
 import orderApi from '~/apis/orderApi';
 import userApi from '~/apis/userApi';
 import moment from 'moment';
@@ -33,6 +33,10 @@ const StatCard = ({ label, value, loading, color = 'primary.main', sub }) => (
 
 export default function Overview() {
   const { user } = useOutletContext();
+
+  if (user?.role !== 'admin') {
+    return <Navigate to="/dashboard/orders" replace />;
+  }
 
   const [orderStats, setOrderStats] = useState(null);
   const [userStats, setUserStats] = useState(null);

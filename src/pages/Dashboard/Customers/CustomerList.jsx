@@ -40,12 +40,13 @@ export default function CustomerList() {
 
   const [viewDialogVisible, setViewDialogVisible] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
+  const [summary, setSummary] = useState({ total: 0, active: 0, verified: 0 });
 
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchCustomers(); }, [paginationModel, searchValue]);
   const fetchCustomers = async () => {
-    try { setLoading(true); const r = await userApi.getAllCustomers({ page: paginationModel.page + 1, limit: paginationModel.pageSize, search: searchValue || undefined }); const d = r.data; setCustomers(d.customers || d || []); setTotalRecords(d.pagination?.total || 0); } catch { toast.error('Failed to fetch customers'); } finally { setLoading(false); }
+    try { setLoading(true); const r = await userApi.getAllCustomers({ page: paginationModel.page + 1, limit: paginationModel.pageSize, search: searchValue || undefined }); const d = r.data; setCustomers(d.customers || d || []); setTotalRecords(d.pagination?.total || 0); if (d?.stats) setSummary(d.stats); } catch { toast.error('Failed to fetch customers'); } finally { setLoading(false); }
   };
   const resetForm = () => { setFormPhone(''); setFormName(''); setFormEmail(''); setFormAddress(''); setFormNote(''); setFormStatus('active'); setIsEdit(false); setEditId(null); };
   const openCreateDialog = () => { resetForm(); setDialogVisible(true); };
@@ -67,7 +68,7 @@ export default function CustomerList() {
         await userApi.createCustomer({ phone: formPhone.startsWith('0') ? formPhone.replace(/^0/, '+84') : formPhone, name: formName, email: formEmail, address: formAddress, note: formNote }); 
         toast.success('Customer created'); 
       } 
-      setDialogVisible(false); fetchCustomers(); 
+      setDialogVisible(false); fetchCustomers();
     } catch (err) { toast.error(err.response?.data?.message || 'Failed'); } 
     finally { setSaving(false); }
   };
@@ -94,7 +95,7 @@ export default function CustomerList() {
         <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreateDialog} disableElevation>New Customer</Button>
       </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {[{ l: 'Total', v: totalRecords }, { l: 'Active', v: customers.filter(c => (c.status || 'active') === 'active').length }, { l: 'Verified', v: customers.filter(c => c.isVerified).length }].map((s) => (
+        {[{ l: 'Total', v: summary.total || totalRecords }, { l: 'Active', v: summary.active || customers.filter(c => (c.status || 'active') === 'active').length }, { l: 'Verified', v: summary.verified || customers.filter(c => c.isVerified).length }].map((s) => (
           <Grid size={{ xs: 4 }} key={s.l}><Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.l}</Typography><Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>{s.v}</Typography></Paper></Grid>
         ))}
       </Grid>

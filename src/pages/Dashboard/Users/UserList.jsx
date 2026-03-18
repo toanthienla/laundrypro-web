@@ -52,10 +52,10 @@ export default function UserList() {
 
   const [viewDialogVisible, setViewDialogVisible] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
+  const [summary, setSummary] = useState({ total: 0, active: 0, verified: 0 });
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchUsers(); }, [paginationModel, searchValue]);
-
   const fetchUsers = async () => {
     try {
       setLoading(true);
@@ -63,6 +63,7 @@ export default function UserList() {
       const d = r.data;
       setUsers(d.users || d || []);
       setTotalRecords(d.pagination?.total || 0);
+      if (d?.stats) setSummary(d.stats);
     } catch { toast.error('Failed to fetch users'); }
     finally { setLoading(false); }
   };
@@ -133,7 +134,7 @@ export default function UserList() {
         <Button variant="contained" size="small" startIcon={<AddIcon />} onClick={openCreateDialog} disableElevation>Add Staff</Button>
       </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {[{ l: 'Total', v: totalRecords }, { l: 'Active', v: users.filter(u => (u.status || 'active') === 'active').length }, { l: 'Verified', v: users.filter(u => u.isVerified).length }].map((s) => (
+        {[{ l: 'Total', v: summary.total || totalRecords }, { l: 'Active', v: summary.active || users.filter(u => (u.status || 'active') === 'active').length }, { l: 'Verified', v: summary.verified || users.filter(u => u.isVerified).length }].map((s) => (
           <Grid size={{ xs: 4 }} key={s.l}><Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.l}</Typography><Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>{s.v}</Typography></Paper></Grid>
         ))}
       </Grid>

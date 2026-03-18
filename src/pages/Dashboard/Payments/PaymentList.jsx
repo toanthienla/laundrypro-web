@@ -12,20 +12,12 @@ import IconButton from '@mui/material/IconButton';
 import Paper from '@mui/material/Paper';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import Checkbox from '@mui/material/Checkbox';
 import { DataGrid } from '@mui/x-data-grid';
 import Drawer from '@mui/material/Drawer';
 
 import EditIcon from '@mui/icons-material/Edit';
-import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import CloseIcon from '@mui/icons-material/Close';
-import InputAdornment from '@mui/material/InputAdornment';
 
 export default function PaymentList() {
   const [payments, setPayments] = useState([]);
@@ -42,10 +34,17 @@ export default function PaymentList() {
 
   const [viewDialogVisible, setViewDialogVisible] = useState(false);
   const [viewTarget, setViewTarget] = useState(null);
+  const [summary, setSummary] = useState({ total: 0, paid: 0, pending: 0, failed: 0, refunded: 0 });
 
   const navigate = useNavigate();
 
-  const statusOpts = ['pending', 'paid', 'failed', 'refunded'];
+  // Define allowed state transitions
+  const allowedTransitions = {
+    pending: ['paid', 'failed'],
+    failed: ['pending'],
+    paid: ['refunded'],
+    refunded: []
+  };
 
   useEffect(() => {
     const delayDebounceFn = setTimeout(() => {
@@ -54,12 +53,42 @@ export default function PaymentList() {
     return () => clearTimeout(delayDebounceFn);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paginationModel, searchQuery]);
+
   const fetchPayments = async () => {
-    try { setLoading(true); const params = { page: paginationModel.page + 1, limit: paginationModel.pageSize }; if (searchQuery) params.search = searchQuery; const r = await paymentApi.getAllPayments(params); setPayments(r.data.payments || []); setTotalRecords(r.data.pagination?.total || 0); } catch { toast.error('Failed to fetch payments'); } finally { setLoading(false); }
+    try {
+      setLoading(true);
+      const params = { page: paginationModel.page + 1, limit: paginationModel.pageSize };
+      if (searchQuery) params.search = searchQuery;
+      const r = await paymentApi.getAllPayments(params);
+      setPayments(r.data.payments || []);
+      setTotalRecords(r.data.pagination?.total || 0);
+      if (r.data.stats) setSummary(r.data.stats);
+    } catch {
+      toast.error('Failed to fetch payments');
+    } finally {
+      setLoading(false);
+    }
   };
-  const openStatusDialog = (p) => { setSelectedPayment(p); setNewStatus(p.status); setTrxRef(p.transactionRef || ''); setStatusDialogVisible(true); };
+
+  const openStatusDialog = (p) => {
+    setSelectedPayment(p);
+    setNewStatus(p.status); // Default to current status
+    setTrxRef(p.transactionRef || '');
+    setStatusDialogVisible(true);
+  };
+
   const submitStatusUpdate = async () => {
-    try { setUpdating(true); await paymentApi.updatePaymentStatus(selectedPayment._id, { status: newStatus, transactionRef: trxRef }); toast.success('Updated'); setStatusDialogVisible(false); fetchPayments(); } catch { toast.error('Failed'); } finally { setUpdating(false); }
+    try {
+      setUpdating(true);
+      await paymentApi.updatePaymentStatus(selectedPayment._id, { status: newStatus, transactionRef: trxRef });
+      toast.success('Updated');
+      setStatusDialogVisible(false);
+      fetchPayments();
+    } catch {
+      toast.error('Failed');
+    } finally {
+      setUpdating(false);
+    }
   };
 
   const openViewDialog = (p) => { setViewTarget(p); setViewDialogVisible(true); };
@@ -74,7 +103,17 @@ export default function PaymentList() {
     { field: 'amount', headerName: 'Amount', minWidth: 100, flex: 0.8, renderCell: (p) => <Typography variant="body2" sx={{ fontWeight: 600 }}>{fmt(p.value)}</Typography> },
     { field: 'method', headerName: 'Method', minWidth: 80, flex: 0.6, renderCell: (p) => <Typography variant="body2" sx={{ textTransform: 'uppercase', fontSize: '0.8rem' }}>{p.value}</Typography> },
     { field: 'status', headerName: 'Status', minWidth: 90, flex: 0.7, renderCell: (p) => <Typography variant="body2" sx={statusStyle(p.value)}>{p.value?.toUpperCase()}</Typography> },
-    { field: 'actions', headerName: '', width: 80, sortable: false, renderCell: (p) => (<Box sx={{ display: 'flex', gap: 0.5 }}><IconButton size="small" onClick={() => openViewDialog(p.row)}><VisibilityIcon fontSize="small" /></IconButton><IconButton size="small" onClick={() => openStatusDialog(p.row)}><EditIcon fontSize="small" /></IconButton></Box>) },
+    {
+      field: 'actions', headerName: '', width: 80, sortable: false, renderCell: (p) => {
+        const canEdit = allowedTransitions[p.row.status]?.length > 0;
+        return (
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            <IconButton size="small" onClick={() => openViewDialog(p.row)}><VisibilityIcon fontSize="small" /></IconButton>
+            {canEdit && <IconButton size="small" onClick={() => openStatusDialog(p.row)}><EditIcon fontSize="small" /></IconButton>}
+          </Box>
+        );
+      }
+    },
   ];
 
   return (
@@ -83,8 +122,32 @@ export default function PaymentList() {
         <Box><Typography variant="h5" sx={{ fontWeight: 700 }}>Payments</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Transaction history and payment records.</Typography></Box>
       </Box>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {[{ l: 'Total', v: totalRecords }, { l: 'Paid', v: payments.filter(p => p.status === 'paid').length }, { l: 'Pending', v: payments.filter(p => p.status === 'pending').length }].map((s) => (
-          <Grid size={{ xs: 4 }} key={s.l}><Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}><Typography variant="caption" color="text.secondary" sx={{ fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s.l}</Typography><Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>{s.v}</Typography></Paper></Grid>
+        {[
+          { l: 'Total', v: summary.total || totalRecords },
+          { l: 'Paid', v: summary.paid || payments.filter(p => p.status === 'paid').length },
+          { l: 'Pending', v: summary.pending || payments.filter(p => p.status === 'pending').length },
+          { l: 'Failed', v: summary.failed || payments.filter(p => p.status === 'failed').length },
+          { l: 'Refunded', v: summary.refunded || payments.filter(p => p.status === 'refunded').length }
+        ].map((s) => (
+          <Grid size={{ xs: 4 }} key={s.l}>
+            <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{
+                  fontWeight: 500,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em'
+                }}
+              >
+                {s.l}
+              </Typography>
+
+              <Typography variant="h6" sx={{ fontWeight: 700, mt: 0.5 }}>
+                {s.v}
+              </Typography>
+            </Paper>
+          </Grid>
         ))}
       </Grid>
       <Paper variant="outlined" sx={{ borderRadius: 2, p: 2 }}>
@@ -98,12 +161,17 @@ export default function PaymentList() {
           <IconButton onClick={() => setStatusDialogVisible(false)} size="small" disabled={updating}><CloseIcon fontSize="small" /></IconButton>
         </Box>
         <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2.5 }}>
-          <TextField select label="Status" value={newStatus} onChange={(e) => setNewStatus(e.target.value)} fullWidth size="medium">{statusOpts.map(s => <MenuItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</MenuItem>)}</TextField>
+          <TextField select label="Status" value={newStatus} onChange={(e) => setNewStatus(e.target.value)} fullWidth size="medium">
+            {/* Inject the current status into the menu items so it displays properly as the default */}
+            {selectedPayment && [selectedPayment.status, ...allowedTransitions[selectedPayment.status]].map(s => (
+              <MenuItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</MenuItem>
+            ))}
+          </TextField>
           {(newStatus === 'paid' || newStatus === 'refunded') && <TextField label="Transaction Ref" value={trxRef} onChange={(e) => setTrxRef(e.target.value)} fullWidth size="medium" />}
         </Box>
         <Box sx={{ p: 3, borderTop: 1, borderColor: 'divider', display: 'flex', justifyContent: 'flex-end', gap: 1.5, bgcolor: 'grey.50' }}>
           <Button onClick={() => setStatusDialogVisible(false)} disabled={updating} color="inherit" sx={{ flex: 1 }}>Cancel</Button>
-          <Button variant="contained" onClick={submitStatusUpdate} disabled={updating} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{updating ? 'Saving...' : 'Save Changes'}</Button>
+          <Button variant="contained" onClick={submitStatusUpdate} disabled={updating || newStatus === selectedPayment?.status} disableElevation sx={{ flex: 2, py: 1, fontSize: '1rem' }}>{updating ? 'Saving...' : 'Save Changes'}</Button>
         </Box>
       </Drawer>
 
@@ -117,19 +185,19 @@ export default function PaymentList() {
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
               <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Transaction Info</Typography>
               <Grid container spacing={2}>
-                <Grid size={12}><Typography variant="caption" color="text.secondary">Transaction ID</Typography><Typography variant="body1" sx={{ fontWeight: 500, fontFamily: 'monospace' }}>{viewTarget._id}</Typography></Grid>
-                <Grid size={6}><Typography variant="caption" color="text.secondary">Date</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{moment(viewTarget.createdAt).format('DD/MM/YYYY HH:mm')}</Typography></Grid>
-                <Grid size={6}><Typography variant="caption" color="text.secondary">Amount</Typography><Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>{fmt(viewTarget.amount)}</Typography></Grid>
-                <Grid size={6}><Typography variant="caption" color="text.secondary">Method</Typography><Typography variant="body1" sx={{ fontWeight: 500, textTransform: 'uppercase' }}>{viewTarget.method}</Typography></Grid>
-                <Grid size={6}><Typography variant="caption" color="text.secondary">Status </Typography><Typography variant="body2" sx={{ ...statusStyle(viewTarget.status), display: 'inline-block', mt: 0.5 }}>{viewTarget.status?.toUpperCase()}</Typography></Grid>
-                {viewTarget.transactionRef && <Grid size={12}><Typography variant="caption" color="text.secondary">Reference Note</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.transactionRef}</Typography></Grid>}
+                <Grid item xs={12}><Typography variant="caption" color="text.secondary">Transaction ID</Typography><Typography variant="body1" sx={{ fontWeight: 500, fontFamily: 'monospace' }}>{viewTarget._id}</Typography></Grid>
+                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Date</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{moment(viewTarget.createdAt).format('DD/MM/YYYY HH:mm')}</Typography></Grid>
+                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Amount</Typography><Typography variant="body1" sx={{ fontWeight: 600, color: 'primary.main' }}>{fmt(viewTarget.amount)}</Typography></Grid>
+                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Method</Typography><Typography variant="body1" sx={{ fontWeight: 500, textTransform: 'uppercase' }}>{viewTarget.method}</Typography></Grid>
+                <Grid item xs={6}><Typography variant="caption" color="text.secondary">Status </Typography><Typography variant="body2" sx={{ ...statusStyle(viewTarget.status), display: 'inline-block', mt: 0.5 }}>{viewTarget.status?.toUpperCase()}</Typography></Grid>
+                {viewTarget.transactionRef && <Grid item xs={12}><Typography variant="caption" color="text.secondary">Reference Note</Typography><Typography variant="body1" sx={{ fontWeight: 500 }}>{viewTarget.transactionRef}</Typography></Grid>}
               </Grid>
             </Paper>
 
             <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: 'grey.50' }}>
               <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.secondary', mb: 2, textTransform: 'uppercase', fontSize: '0.75rem', letterSpacing: '0.05em' }}>Order Related</Typography>
               <Grid container spacing={2}>
-                <Grid size={12}>
+                <Grid item xs={12}>
                   <Typography variant="caption" color="text.secondary">Order ID</Typography>
                   <Box sx={{ mt: 0.5 }}>
                     <Button variant="outlined" size="small" onClick={() => navigate(`/dashboard/orders/${viewTarget.orderId?._id || viewTarget.orderId}`)} sx={{ fontWeight: 600, fontFamily: 'monospace' }}>#{String(viewTarget.orderId?._id || viewTarget.orderId).substring(String(viewTarget.orderId?._id || viewTarget.orderId).length - 6).toUpperCase()}</Button>
