@@ -127,7 +127,7 @@ export default function ServiceList() {
         <Box sx={{ p: 3, flexGrow: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
           <TextField label="Name *" value={formName} onChange={(e) => setFormName(e.target.value)} fullWidth size="medium" />
           <Grid container spacing={2}>
-            <Grid size={6}><TextField label="Price *" type="number" value={formPrice} onChange={(e) => setFormPrice(e.target.value)} fullWidth size="medium" /></Grid>
+            <Grid size={6}><TextField label="Price *" type="number" value={formPrice} onChange={(e) => setFormPrice(e.target.value)} fullWidth size="medium" InputProps={{ endAdornment: <InputAdornment position="end">đ</InputAdornment> }} /></Grid>
             <Grid size={6}><TextField label="Unit *" value={formUnit} onChange={(e) => setFormUnit(e.target.value)} fullWidth size="medium" placeholder="e.g. kg, pcs..." /></Grid>
           </Grid>
           <Autocomplete

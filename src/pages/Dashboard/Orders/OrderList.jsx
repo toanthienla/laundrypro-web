@@ -254,7 +254,7 @@ export default function OrderList() {
   };
 
 
-  const statusStyle = (s) => ({ color: s === 'completed' ? '#16a34a' : '#d97706', fontWeight: 600, fontSize: '0.8rem' });
+  const statusStyle = (s) => ({ color: s === 'completed' ? '#16a34a' : s === 'deleted' ? '#dc2626' : '#d97706', fontWeight: 600, fontSize: '0.8rem' });
   const payStyle = (s) => ({ color: { paid: '#16a34a', pending: '#d97706', failed: '#dc2626', refunded: '#2563eb' }[s] || '#6b7280', fontWeight: 600, fontSize: '0.8rem' });
 
   const columns = [

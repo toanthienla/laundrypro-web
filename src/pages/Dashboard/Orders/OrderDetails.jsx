@@ -34,7 +34,7 @@ export default function OrderDetailsDrawer({ open, orderId, onClose, onUpdate })
   const [formTrxRef, setFormTrxRef] = useState('');
   const [formMarkAsPaid, setFormMarkAsPaid] = useState(false);
   const [paymentSaving, setPaymentSaving] = useState(false);
-  const methodOpts = [{ l: 'Cash', v: 'cash' }, { l: 'MoMo', v: 'momo' }, { l: 'VNPay', v: 'vnpay' }, { l: 'Bank Transfer', v: 'bank' }];
+  const methodOpts = [{ l: 'Cash', v: 'cash' }];
 
   useEffect(() => {
     if (!open || !orderId) return;
